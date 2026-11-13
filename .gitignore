@@ -1,0 +1,6 @@
+# Release-zip-filer lægges på GitHub som release, ikke i koden
+*.zip
+# Systemfiler
+.DS_Store
+Thumbs.db
+desktop.ini

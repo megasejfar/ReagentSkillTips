@@ -1,0 +1,3 @@
+# Billedfiler er binære og må ikke ændres af git
+*.tga binary
+*.blp binary
