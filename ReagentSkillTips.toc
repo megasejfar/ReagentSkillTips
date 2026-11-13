@@ -3,6 +3,7 @@
 ## Notes: Shows which professions, recipes and skill levels a reagent is used for.
 ## Author: Boomsticky
 ## Version: 1.3.7
+## X-Curse-Project-ID: 1802307
 ## OptionalDeps: LibStub, LibProfessionDB, ProfessionDB
 ## SavedVariablesPerCharacter: ReagentSkillTipsCharDB
 ## IconTexture: Interface\AddOns\ReagentSkillTips\Media\MinimapIcon
