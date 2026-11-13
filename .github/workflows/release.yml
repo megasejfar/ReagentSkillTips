@@ -1,11 +1,15 @@
 # Pakker addonet og udgiver det på CurseForge og GitHub,
 # når der pushes et versions-tag, f.eks. v1.3.8.
+#
+# Testknap: Actions -> Release -> "Run workflow" bygger zip-filen
+# uden at uploade noget. Zip'en kan hentes under "Artifacts" på kørslen.
 name: Release
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 jobs:
   release:
@@ -23,3 +27,13 @@ jobs:
 
       - name: Package and release
         uses: BigWigsMods/packager@v2
+        with:
+          # -d = byg kun, upload ikke (bruges ved testknappen)
+          args: ${{ github.event_name == 'workflow_dispatch' && '-d' || '' }}
+
+      - name: Save test zip
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ReagentSkillTips-test
+          path: .release/*.zip
