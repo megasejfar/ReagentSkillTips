@@ -4,6 +4,10 @@ Author: Boomsticky
 Game: World of Warcraft: Forever (interface 16001)
 Requires: LibProfessionDB (with Ace3 and VersionCheck-1.0)
 
+## 1.3.8 – 2026-11-14
+- "Reagent for" now always shows the icons of all professions that use the item. The profession filter only decides which professions and recipes are listed below it. If the filter hides them all, only the "Reagent for" line is shown (before, the tooltip showed nothing).
+- Added GitHub repo and connected to CurseForge.
+
 ## 1.3.7 – 2026-11-13
 - "Only my own professions" is now at the top of the profession list in the settings, with a thin line below it. The All and None buttons are above the list.
 - When "Only my own professions" is on, all your own professions are shown, and the profession checkboxes and the All and None buttons are greyed out. Your choices in the list are kept and used again when you turn it off.

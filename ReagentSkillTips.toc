@@ -2,7 +2,7 @@
 ## Title: Reagent Skill Tips
 ## Notes: Shows which professions, recipes and skill levels a reagent is used for.
 ## Author: Boomsticky
-## Version: 1.3.7
+## Version: 1.3.8
 ## X-Curse-Project-ID: 1802307
 ## OptionalDeps: LibStub, LibProfessionDB, ProfessionDB
 ## SavedVariablesPerCharacter: ReagentSkillTipsCharDB

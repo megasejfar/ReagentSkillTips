@@ -503,10 +503,15 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
 
     local skills, localNames = GetPlayerSkills()
 
-    -- Gruppér pr. profession
-    local groups, order = {}, {}
+    -- Gruppér pr. profession. "Reagent for" viser altid alle professions,
+    -- der bruger itemet; filteret bestemmer kun, hvilke opskrifter der vises.
+    local groups, order, all, seen = {}, {}, {}, {}
     for _, ref in ipairs(list) do
         local p = ref.e.profId
+        if not seen[p] then
+            seen[p] = true
+            all[#all + 1] = p
+        end
         -- "Only my own professions": alle egne professions vises, og listen
         -- med fravalgte professions bruges ikke. Ellers bestemmer listen.
         local wanted
@@ -527,24 +532,31 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
             g[#g + 1] = ref
         end
     end
-    if #order == 0 then return false end
 
     -- Dine egne professions først, derefter alfabetisk
-    table.sort(order, function(a, b)
+    local function OwnFirst(a, b)
         local la, lb = skills[a] ~= nil, skills[b] ~= nil
         if la ~= lb then return la end
         return ProfName(a, localNames) < ProfName(b, localNames)
-    end)
+    end
+    table.sort(order, OwnFirst)
+    table.sort(all, OwnFirst)
 
     local expanded = forceExpanded or (IsShiftKeyDown and IsShiftKeyDown())
     local maxLines = math.max(1, tonumber(S.maxPerProfession) or DEFAULTS.maxPerProfession)
     local showNumbers = forceExpanded or not S.hideNumbers
 
-    -- Overskrift med ikoner for alle professions
+    -- Overskrift med ikoner for alle professions, også dem filteret skjuler
     local icons = {}
-    for i, p in ipairs(order) do icons[i] = IconString(p, 16) end
+    for i, p in ipairs(all) do icons[i] = IconString(p, 16) end
     local header = L.REAGENT_FOR .. " " .. table.concat(icons, " ")
     tooltip:AddLine(" ")
+
+    -- Filteret skjuler alle professions: kun ikonlinjen (Shift viser ikke mere)
+    if #order == 0 then
+        tooltip:AddLine(header, 1, 0.82, 0)
+        return true
+    end
 
     -- Kompakt visning: uden Shift kun ikonlinjen
     if S.compact and not expanded then
