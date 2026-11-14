@@ -20,8 +20,8 @@ The four numbers are the skill levels where the recipe turns **orange, yellow, g
 
 ## Features
 
-- **Every recipe in the game**, not only the ones your character knows. The recipe data comes from LibProfessionDB, which reads Forever's own game files.
-- **Profession icons** for every profession that uses the item.
+- **No dependencies.** The data for every recipe in the game is built in, not only the ones your character knows.
+- **Profession icons** for every profession that uses the item – also the ones you have filtered out.
 - **Known recipes are marked** with a green check, unknown ones with a red cross. Open each profession window once so the addon can see your recipes.
 - Your own professions are listed first. `x2` shows when a recipe uses more than one of the item.
 - **Hold Shift** to see all recipes. Without Shift, the list starts at the first recipe that is not grey for you.
@@ -29,13 +29,14 @@ The four numbers are the skill levels where the recipe turns **orange, yellow, g
 
 ## Installation
 
-**CurseForge app:** install Reagent Skill Tips. LibProfessionDB is installed automatically.
+**CurseForge app:** install Reagent Skill Tips. Nothing else is needed.
 
 **Manually:**
-1. Install LibProfessionDB from CurseForge (the Forever version). It also brings Ace3 and VersionCheck-1.0.
-2. Download `ReagentSkillTips-x.y.z.zip` from [Releases](../../releases) and unzip it so the path becomes
+1. Download `ReagentSkillTips-vX.Y.Z-forever.zip` from [Releases](../../releases) and unzip it so the path becomes
    `World of Warcraft\_forever_\Interface\AddOns\ReagentSkillTips\ReagentSkillTips.toc`
-3. Restart WoW completely.
+2. Restart WoW completely.
+
+Versions before 1.4.0 needed LibProfessionDB. You can uninstall it (and Ace3 and VersionCheck-1.0) if no other addon uses it.
 
 ## Settings
 
@@ -65,9 +66,19 @@ Changes are saved when you click **Save**. Settings are saved per character.
 The skill levels come from LibProfessionDB and are corrected for Forever. In Forever the green level is always halfway between yellow and grey, and the addon uses that to fix the yellow and green levels.
 
 - `*` after the first number: the skill requirement is borrowed from Vanilla and not yet confirmed for Forever.
-- `?`: the skill requirement is not known for Forever yet.
+- `?`: that level is not known for Forever yet.
 
 Levels that have been checked in the game are kept in the `CONFIRMED` table at the top of `ReagentSkillTips.lua`.
+
+## Updating the recipe data
+
+The recipe data in `Data.lua` is generated from LibProfessionDB's Forever data. Do not edit it by hand. When LibProfessionDB has been updated, install the new version in WoW and run:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-data.ps1
+```
+
+The script reads `World of Warcraft\_forever_\Interface\AddOns\ProfessionDB` (use `-ProfessionDB <folder>` for another location), takes only the fields the addon uses, and rewrites `Data.lua`. It stops with an error instead of writing a broken file if the data format has changed. `/rst status` in the game shows which data version is built in.
 
 ## Contributing
 
@@ -76,3 +87,5 @@ Found a recipe with wrong skill levels? Open an [issue](../../issues) with the r
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+The recipe data in `Data.lua` comes from LibProfessionDB, Copyright (c) 2026 Pimptasty, used under the MIT License. The full license text is at the top of `Data.lua`.

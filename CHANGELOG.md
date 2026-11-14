@@ -2,7 +2,14 @@
 
 Author: Boomsticky
 Game: World of Warcraft: Forever (interface 16001)
-Requires: LibProfessionDB (with Ace3 and VersionCheck-1.0)
+Requires: nothing (the recipe data is built in)
+
+## 1.4.0 – 2026-11-14
+- No more dependencies. The recipe data is now built into the addon (`Data.lua`), so LibProfessionDB, Ace3 and VersionCheck-1.0 are no longer needed. You can uninstall them if no other addon uses them.
+- The recipe data comes from LibProfessionDB v1.9.1 (Forever build 1.60.1.69977) by Pimptasty, MIT License. `/rst status` shows which data version is built in.
+- Recipe names are looked up in the game, so they are shown in your game's language.
+- The chat message at login and `/rst status` now show the right version. 1.3.8 still said 1.3.7.
+- Removed `/rst dump`, which only showed LibProfessionDB's data format.
 
 ## 1.3.8 – 2026-11-14
 - "Reagent for" now always shows the icons of all professions that use the item. The profession filter only decides which professions and recipes are listed below it. If the filter hides them all, only the "Reagent for" line is shown (before, the tooltip showed nothing).

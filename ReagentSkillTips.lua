@@ -9,14 +9,22 @@
       * opskriftsnavnet farvet efter din karakters skill
         (rød = for lav skill, orange, gul, grøn, grå)
 
-    Opskriftsdata kommer fra LibProfessionDB-1.0, som har alle Forevers
-    opskrifter læst fra spillets egne filer.
+    Opskriftsdata ligger i Data.lua, som er bygget ud fra LibProfessionDB
+    (alle Forevers opskrifter læst fra spillets egne filer). Addonet har
+    ingen afhængigheder af andre addons.
 ]]
 
-local ADDON_NAME = ...
+local ADDON_NAME, ns = ...
 
-local VERSION = "1.3.7"
-local LIB_MAJOR = "LibProfessionDB-1.0"
+-- Versionen læses fra "## Version:" i .toc-filen, så den altid passer
+local VERSION = "?"
+do
+    local getMeta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+    if getMeta then
+        local ok, v = pcall(getMeta, ADDON_NAME or "ReagentSkillTips", "Version")
+        if ok and type(v) == "string" and v ~= "" then VERSION = v end
+    end
+end
 local PREFIX = "|cff33ff99Reagent Skill Tips:|r "
 
 -- Slash-kommandoen registreres først, så /rst svarer selv hvis
@@ -56,7 +64,7 @@ local L = {
     ALL_GREY    = "all recipes are grey for you",
     SCAN_HINT   = "Open your profession window once to mark known recipes.",
     UNCONFIRMED = "* skill requirement not yet confirmed for Forever",
-    NO_LIB      = "LibProfessionDB-1.0 was not found. Install LibProfessionDB (with Ace3 and VersionCheck-1.0).",
+    NO_DATA     = "the recipe data (Data.lua) was not loaded. Reinstall Reagent Skill Tips.",
 }
 
 -- Farver (samme som Blizzards profession-farver) + rød for "kan ikke endnu"
@@ -100,7 +108,7 @@ local CONFIRMED = {
     },
 }
 
--- Rækkefølge hvis biblioteket ikke kan levere listen
+-- Reserve til indstillingerne, hvis opskriftsdataene ikke kan indlæses
 local DEFAULT_PROFS = { 171, 164, 185, 333, 202, 129, 165, 186, 197 }
 
 local S = { hiddenProfs = {}, known = {}, scannedProfs = {} }   -- gemmes pr. karakter
@@ -112,7 +120,7 @@ local placeholderCount, droppedCount = 0, 0   -- til /rst status
 local indexProfs = {}              -- professions der har opskrifter med reagenser
 local recipeProf = {}              -- [spellID] = skillLine (alle opskrifter)
 local recipeByName = {}            -- [navn] = { spellID, ... } (reserve til Classic-API)
-local libProfNames = {}            -- navne fra biblioteket, hvis det har dem
+local profNameCache = {}           -- profession-navne slået op i spillet
 local shownOn = {}                 -- tooltips hvor vi har tilføjet linjer
 
 ------------------------------------------------------------------------
@@ -121,27 +129,13 @@ local shownOn = {}                 -- tooltips hvor vi har tilføjet linjer
 
 local function Print(msg) print(PREFIX .. tostring(msg)) end
 
-local function GetDB()
-    if not LibStub then return nil end
-    return LibStub(LIB_MAJOR, true)
-end
-
--- Kalder obj:method(...) sikkert. Returnerer nil hvis metoden mangler eller fejler.
-local function try(obj, method, ...)
-    local f = obj and obj[method]
-    if type(f) ~= "function" then return nil end
-    local ok, a, b, c = pcall(f, obj, ...)
-    if ok then return a, b, c end
-    return nil
-end
-
 local function ProfName(p, localNames)
     if localNames and localNames[p] then return localNames[p] end
-    if libProfNames[p] then return libProfNames[p] end
+    if profNameCache[p] then return profNameCache[p] end
     if C_TradeSkillUI and C_TradeSkillUI.GetTradeSkillDisplayName then
         local ok, name = pcall(C_TradeSkillUI.GetTradeSkillDisplayName, p)
         if ok and type(name) == "string" and name ~= "" then
-            libProfNames[p] = name
+            profNameCache[p] = name
             return name
         end
     end
@@ -154,128 +148,31 @@ local function IconString(p, size)
 end
 
 ------------------------------------------------------------------------
--- Læsning af LibProfessionDB (skrevet så den tåler flere dataformater)
+-- Opskriftsdata. Data.lua bygges af tools/build-data.ps1 ud fra
+-- LibProfessionDB og har én post pr. opskrift (nøgle = opskriftens spell-id):
+--   n = engelsk navn, d = {orange, gul, grøn, grå}, q = skill-krav,
+--   b = true hvis kravet er lånt fra Vanilla, r = { [itemID] = antal }
 ------------------------------------------------------------------------
 
-local function ProfessionIDs(db)
-    local list, seen = {}, {}
-    local function add(id)
-        if type(id) == "number" and id > 100 and not seen[id] then
-            seen[id] = true
-            list[#list + 1] = id
-        end
-    end
-
-    local profs = try(db, "GetProfessions")
-    if type(profs) == "table" then
-        for k, v in pairs(profs) do
-            if type(k) == "number" and k > 100 then
-                add(k)
-                if type(v) == "string" then libProfNames[k] = v end
-                if type(v) == "table" and type(v.name) == "string" then libProfNames[k] = v.name end
-            elseif type(v) == "number" then
-                add(v)
-            elseif type(v) == "table" then
-                local id = v.id or v.profId or v.skillLine or v.skillLineID or v[1]
-                add(id)
-                if type(id) == "number" and type(v.name) == "string" then libProfNames[id] = v.name end
-            end
-        end
-    end
-
-    -- Reserve: prøv alle kendte professions
-    if #list == 0 then
-        for id in pairs(PROFESSIONS) do add(id) end
-    end
-    return list
-end
-
-local function ForEachRecipe(db, profId, fn)
-    local recipes = try(db, "GetRecipes", profId)
-    if type(recipes) == "table" then
-        for k, v in pairs(recipes) do
-            if type(v) == "table" then
-                fn(v.id or v.spellID or v.spellId or v.recipeID or k, v)
-            elseif type(v) == "number" then
-                fn(v, try(db, "GetRecipe", profId, v))
-            elseif v == true and type(k) == "number" then
-                fn(k, try(db, "GetRecipe", profId, k))
-            end
-        end
-        return
-    end
-
-    -- Reserve: Iterate(profId) som iterator
-    if type(db.Iterate) == "function" then
-        local ok, f, s, var = pcall(db.Iterate, db, profId)
-        if ok and type(f) == "function" then
-            for a, b, c in f, s, var do
-                if type(c) == "table" then
-                    fn(c.id or c.spellID or b, c)
-                elseif type(b) == "table" then
-                    fn(b.id or b.spellID or a, b)
-                end
-            end
-        end
-    end
-end
-
-local function ForEachReagent(db, profId, id, recipe, fn)
-    local reagents = recipe.reagents
-    if type(reagents) ~= "table" then reagents = try(db, "GetReagents", profId, id) end
-    if type(reagents) ~= "table" then return end
-
-    for k, v in pairs(reagents) do
-        if type(v) == "table" then
-            local itemID = v.itemID or v.itemId or v.id or v.item or v[1]
-            local count = v.count or v.quantity or v.qty or v[2] or 1
-            if type(itemID) == "number" then fn(itemID, tonumber(count) or 1) end
-        elseif type(v) == "number" then
-            if type(k) == "number" and k > 20 then
-                fn(k, v)   -- { [itemID] = antal }
-            else
-                fn(v, 1)   -- { itemID, itemID, ... }
-            end
-        end
-    end
-end
-
-local function GetTiers(db, profId, id, recipe)
-    local d = recipe.difficulty
-    if type(d) ~= "table" then d = try(db, "GetDifficulty", profId, id) end
-    if type(d) ~= "table" then return nil end
-    local t = {
-        tonumber(d[1] or d.orange),
-        tonumber(d[2] or d.yellow),
-        tonumber(d[3] or d.green),
-        tonumber(d[4] or d.grey or d.gray),
-    }
-    if not (t[2] and t[3] and t[4]) then return nil end
-    return t
-end
-
-local function GetRequired(db, profId, id, recipe)
-    local req = recipe.requiredSkill
-    if type(req) ~= "number" then req = try(db, "GetRequiredSkill", profId, id) end
-    if type(req) ~= "number" then req = try(db, "GetRequiredSkill", id) end
-    if type(req) ~= "number" then return nil, false end
-
-    local borrowed = false
-    if type(db.IsBorrowed) == "function" then
-        local ok, v = pcall(db.IsBorrowed, db, id, "requiredSkill")
-        borrowed = ok and v and true or false
-    end
-    return req, borrowed
-end
-
-local function MakeEntry(db, profId, id, recipe)
-    local name = recipe.name
-    if type(name) ~= "string" then name = try(db, "GetName", profId, id) end
-    if type(name) ~= "string" and C_Spell and C_Spell.GetSpellName then
+-- Opskriftens navn på spillerens eget sprog. Det engelske navn fra
+-- Data.lua bruges kun, hvis spillet ikke kan slå navnet op.
+local function RecipeName(id, recipe)
+    local name
+    if C_Spell and C_Spell.GetSpellName then
         local ok, n = pcall(C_Spell.GetSpellName, id)
         if ok then name = n end
     end
+    if (type(name) ~= "string" or name == "") and GetSpellInfo then
+        local ok, n = pcall(GetSpellInfo, id)
+        if ok then name = n end
+    end
+    if type(name) ~= "string" or name == "" then name = recipe.n end
     if type(name) ~= "string" then name = "Recipe " .. tostring(id) end
+    return name
+end
+
+local function MakeEntry(profId, id, recipe)
+    local name = RecipeName(id, recipe)
 
     -- Bekræftede Forever-tal går forud for bibliotekets
     local fixed = CONFIRMED[profId] and CONFIRMED[profId][name]
@@ -288,8 +185,10 @@ local function MakeEntry(db, profId, id, recipe)
         }
     end
 
-    local lib = GetTiers(db, profId, id, recipe)      -- bibliotekets {orange, gul, grøn, grå}
-    local req, borrowed = GetRequired(db, profId, id, recipe)
+    local d = recipe.d
+    local lib = (type(d) == "table" and d[2] and d[3] and d[4]) and d or nil   -- bibliotekets {orange, gul, grøn, grå}
+    local req = recipe.q
+    local borrowed = req ~= nil and recipe.b == true
 
     -- I Forever er den grønne grænse altid midten mellem gul og grå
     -- (bekræftet med Bolt of Silk Cloth og Heavy Silk Bandage). Bibliotekets
@@ -349,20 +248,15 @@ local function SortKey(e)
 end
 
 local function BuildIndex()
-    local db = GetDB()
-    if not db then return false, L.NO_LIB end
-    if type(db.IsReady) == "function" then
-        local ok, ready = pcall(db.IsReady, db)
-        if ok and not ready then return false, "LibProfessionDB is not ready yet." end
-    end
+    local data = ns and ns.recipes
+    if type(data) ~= "table" then return false, L.NO_DATA end
 
     local newIndex, recipes, reagents, profs = {}, 0, 0, {}
     local placeholders, dropped = 0, 0
     local profOf, byName = {}, {}
-    for _, profId in ipairs(ProfessionIDs(db)) do
-        ForEachRecipe(db, profId, function(id, recipe)
-            if type(id) ~= "number" or type(recipe) ~= "table" then return end
-            local entry = MakeEntry(db, profId, id, recipe)
+    for profId, list in pairs(data) do
+        for id, recipe in pairs(list) do
+            local entry = MakeEntry(profId, id, recipe)
             recipes = recipes + 1
             if entry.placeholder then placeholders = placeholders + 1 end
             if entry.dropped then dropped = dropped + 1 end
@@ -370,17 +264,17 @@ local function BuildIndex()
             local same = byName[entry.name]
             if not same then same = {}; byName[entry.name] = same end
             same[#same + 1] = id
-            ForEachReagent(db, profId, id, recipe, function(itemID, count)
-                local list = newIndex[itemID]
-                if not list then
-                    list = {}
-                    newIndex[itemID] = list
+            for itemID, count in pairs(recipe.r or {}) do
+                local uses = newIndex[itemID]
+                if not uses then
+                    uses = {}
+                    newIndex[itemID] = uses
                     reagents = reagents + 1
                 end
-                list[#list + 1] = { e = entry, n = count }
+                uses[#uses + 1] = { e = entry, n = count }
                 profs[profId] = true
-            end)
-        end)
+            end
+        end
     end
 
     for _, list in pairs(newIndex) do
@@ -391,7 +285,7 @@ local function BuildIndex()
         end)
     end
 
-    if recipes == 0 then return false, "LibProfessionDB returned no recipes." end
+    if recipes == 0 then return false, L.NO_DATA end
     index, recipeCount, reagentCount, indexProfs = newIndex, recipes, reagents, profs
     placeholderCount, droppedCount = placeholders, dropped
     recipeProf, recipeByName = profOf, byName
@@ -452,7 +346,7 @@ local function GetPlayerSkills()
             local name, isHeader, _, rank = GetSkillLineInfo(i)
             if name and not isHeader then
                 for id, p in pairs(PROFESSIONS) do
-                    if name == p.name or name == libProfNames[id] then
+                    if name == p.name or name == profNameCache[id] then
                         skills[id] = rank
                         names[id] = name
                     end
@@ -1213,26 +1107,10 @@ local ChatTip = {
     end,
 }
 
-local function Describe(v, depth)
-    depth = depth or 0
-    if type(v) ~= "table" then return tostring(v) end
-    if depth >= 2 then return "{...}" end
-    local parts, n = {}, 0
-    for k, x in pairs(v) do
-        n = n + 1
-        if n > 6 then parts[#parts + 1] = "..." break end
-        parts[#parts + 1] = tostring(k) .. "=" .. Describe(x, depth + 1)
-    end
-    return "{" .. table.concat(parts, ", ") .. "}"
-end
-
 local function Status()
     Print("version " .. VERSION .. ", tooltip info " .. (S.enabled and "on" or "off") .. " (settings are saved per character)")
     for _, err in ipairs(loadErrors) do Print("|cffff4040load error|r " .. err) end
-    local db = GetDB()
-    Print("LibProfessionDB: " .. (db and "found" or "NOT found"))
-    if not db then return end
-    Print("IsReady: " .. tostring(try(db, "IsReady")) .. ", game version: " .. tostring(try(db, "GetGameVersion")))
+    Print("recipe data: " .. tostring(ns and ns.dataSource or "NOT loaded"))
     local ok, why = EnsureIndex()
     if ok then
         Print(string.format("Indexed %d recipes and %d reagents.", recipeCount, reagentCount))
@@ -1251,24 +1129,6 @@ local function Status()
     table.sort(checked)
     Print(string.format("Known recipes: %d. Professions checked: %s", nKnown,
         #checked > 0 and table.concat(checked, ", ") or "none yet (open a profession window)"))
-end
-
-local function Dump()
-    local db = GetDB()
-    if not db then Print(L.NO_LIB) return end
-    local profs = try(db, "GetProfessions")
-    Print("GetProfessions() -> " .. Describe(profs))
-    local p = ProfessionIDs(db)[1]
-    local recipes = try(db, "GetRecipes", p)
-    Print("GetRecipes(" .. tostring(p) .. ") -> " .. type(recipes))
-    if type(recipes) == "table" then
-        local k, v = next(recipes)
-        Print("  first key: " .. tostring(k) .. ", value: " .. type(v))
-        local r = (type(v) == "table" and v) or try(db, "GetRecipe", p, type(v) == "number" and v or k)
-        if type(r) == "table" then
-            for fk, fv in pairs(r) do Print("    " .. tostring(fk) .. " = " .. Describe(fv)) end
-        end
-    end
 end
 
 local function ParseItemID(arg)
@@ -1291,7 +1151,6 @@ local function Help()
     print("  /rst known  - toggle: mark known recipes")
     print("  /rst item <itemID or link>  - print the info in chat")
     print("  /rst status  - check the data and your skills")
-    print("  /rst dump  - show the library's data format (for troubleshooting)")
     print("  /rst rebuild  - rebuild the recipe index")
     print("  /rst debug  - toggle error messages in chat")
 end
@@ -1340,8 +1199,6 @@ SlashHandler = function(msg)
         if not AddReagentInfo(ChatTip, id, true) then Print("item " .. id .. " is not used in any recipe.") end
     elseif cmd == "status" then
         Status()
-    elseif cmd == "dump" then
-        Dump()
     elseif cmd == "rebuild" then
         index = nil
         Status()
@@ -1480,7 +1337,7 @@ frame:SetScript("OnEvent", function(_, event, arg1)
         Safe("minimap button", CreateMinimapButton)
         Safe("options panel", RegisterOptionsPanel)
         Print("v" .. VERSION .. " loaded. Type /rst status to check it.")
-        if not GetDB() then Print(L.NO_LIB) end
+        if not (ns and ns.recipes) then Print(L.NO_DATA) end
         if #loadErrors > 0 then Print("|cffff4040there were load errors|r - type /rst status") end
     elseif TRADE_EVENTS[event] then
         RequestScan()
