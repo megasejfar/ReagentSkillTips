@@ -4,6 +4,10 @@ Author: Boomsticky
 Game: World of Warcraft: Forever (interface 16001)
 Requires: nothing (the recipe data is built in)
 
+## 1.5.0 – 2026-11-16
+- New slider in the settings: "Background transparency" (0–100%). It makes the dark background of tooltips that show Reagent Skill Tips info see-through, so you can see the game behind them. Text, icons and the border stay fully visible, and other tooltips are not changed. 0% is the normal background.
+- New command: `/rst transparency <0-100>`.
+
 ## 1.4.0 – 2026-11-14
 - No more dependencies. The recipe data is now built into the addon (`Data.lua`), so LibProfessionDB, Ace3 and VersionCheck-1.0 are no longer needed. You can uninstall them if no other addon uses them.
 - The recipe data comes from LibProfessionDB v1.9.1 (Forever build 1.60.1.69977) by Pimptasty, MIT License. `/rst status` shows which data version is built in.

@@ -45,6 +45,7 @@ Click the minimap button, or open **Esc → Options → AddOns → Reagent Skill
 - Turn each profession on or off in the tooltips.
 - Show info in tooltips, only my own professions, reagent counts (x2), hide grey recipes, compact view (only icons until you hold Shift), hide skill numbers and mark known recipes.
 - Choose how many recipes are shown without Shift (1–30).
+- Background transparency (0–100%) of tooltips that show Reagent Skill Tips info. Text, icons and the border stay fully visible.
 - Show or hide the minimap button.
 
 Changes are saved when you click **Save**. Settings are saved per character.
@@ -58,6 +59,7 @@ Changes are saved when you click **Save**. Settings are saved per character.
 | `/rst options` | Open the settings under Options → AddOns |
 | `/rst item <itemID or link>` | Print the info for an item in chat |
 | `/rst known` | Turn the check/cross marks on or off |
+| `/rst transparency <0-100>` | Set the background transparency of tooltips with reagent info |
 | `/rst status` | Check the recipe data, your skills and known recipes |
 | `/rst debug` | Show error messages in chat |
 

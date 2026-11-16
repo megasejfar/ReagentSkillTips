@@ -50,6 +50,7 @@ local DEFAULTS = {
     compact          = false, -- kun ikonlinjen uden Shift
     hideNumbers      = false, -- skjul de fire skill-tal
     showKnown        = true,  -- flueben ved kendte, kryds ved ukendte opskrifter
+    tooltipTransparency = 0,  -- baggrundens gennemsigtighed i tooltips med reagent-info (0-100 %)
     showMinimap      = true,  -- vis knappen ved minimap
     minimapAngle     = 220,   -- knappens placering rundt om minimap (grader)
     debug            = false,
@@ -524,6 +525,45 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
     return true
 end
 
+-- Baggrundens gennemsigtighed. Bruges kun i tooltips, hvor addonet har
+-- tilføjet linjer, og nulstilles, når tooltippen ryddes eller skjules.
+-- Tekst, ikoner og kant røres ikke.
+local fadedTips = {}   -- [tooltip] = backdrop-alpha før ændringen (true ved NineSlice)
+
+local function ResetTooltipFade(tooltip)
+    local before = fadedTips[tooltip]
+    if before == nil then return end
+    fadedTips[tooltip] = nil
+    local center = tooltip.NineSlice and tooltip.NineSlice.Center
+    if center and center.SetAlpha then
+        center:SetAlpha(1)
+    elseif type(before) == "number" and tooltip.GetBackdropColor and tooltip.SetBackdropColor then
+        local r, g, b = tooltip:GetBackdropColor()
+        if r then tooltip:SetBackdropColor(r, g, b, before) end
+    end
+end
+
+local function ApplyTooltipFade(tooltip)
+    local t = tonumber(S.tooltipTransparency) or 0
+    if t <= 0 then ResetTooltipFade(tooltip) return end
+    local alpha = 1 - math.min(t, 100) / 100
+    local center = tooltip.NineSlice and tooltip.NineSlice.Center
+    if center and center.SetAlpha then
+        -- Moderne tooltips: baggrunden er NineSlice'ens midterstykke
+        center:SetAlpha(alpha)
+        fadedTips[tooltip] = true
+    elseif tooltip.GetBackdropColor and tooltip.SetBackdropColor then
+        -- Ældre tooltips med backdrop: skru ned for baggrundsfarvens alpha
+        local r, g, b, a = tooltip:GetBackdropColor()
+        if r then
+            local before = fadedTips[tooltip]
+            if type(before) ~= "number" then before = a or 1 end
+            tooltip:SetBackdropColor(r, g, b, before * alpha)
+            fadedTips[tooltip] = before
+        end
+    end
+end
+
 local function OnTooltipItem(tooltip, data)
     if tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip then return end
     if tooltip.IsForbidden and tooltip:IsForbidden() then return end
@@ -545,7 +585,11 @@ local function OnTooltipItem(tooltip, data)
 
     local ok, result = pcall(AddReagentInfo, tooltip, itemID)
     if ok then
-        if result then shownOn[tooltip] = true end
+        if result then
+            shownOn[tooltip] = true
+            local okFade, err = pcall(ApplyTooltipFade, tooltip)
+            if not okFade and S.debug then Print(err) end
+        end
     elseif S.debug then
         Print(result)
     end
@@ -576,7 +620,13 @@ end
 for _, tt in ipairs({ GameTooltip, ItemRefTooltip }) do
     if tt and tt.HookScript then
         Safe("OnTooltipCleared", function()
-            tt:HookScript("OnTooltipCleared", function(self) shownOn[self] = nil end)
+            tt:HookScript("OnTooltipCleared", function(self)
+                shownOn[self] = nil
+                pcall(ResetTooltipFade, self)
+            end)
+        end)
+        Safe("OnHide", function()
+            tt:HookScript("OnHide", function(self) pcall(ResetTooltipFade, self) end)
         end)
     end
 end
@@ -616,6 +666,30 @@ local function CreateButton(parent, text, width)
     b:SetSize(width, 22)
     b:SetText(text)
     return b
+end
+
+-- Vandret slider. Skabelonens egen titel bruges ikke (vi laver vores egen).
+local function CreateSlider(parent, width, minV, maxV, step)
+    local ok, s = pcall(CreateFrame, "Slider", nil, parent, "OptionsSliderTemplate")
+    if not ok or not s then
+        s = CreateFrame("Slider", nil, parent)
+        s:SetOrientation("HORIZONTAL")
+        s:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+        local bg = s:CreateTexture(nil, "BACKGROUND")
+        bg:SetPoint("LEFT", 0, 0)
+        bg:SetPoint("RIGHT", 0, 0)
+        bg:SetHeight(6)
+        if bg.SetColorTexture then bg:SetColorTexture(0, 0, 0, 0.6) else bg:SetTexture(0, 0, 0, 0.6) end
+        s:EnableMouse(true)
+    end
+    s:SetSize(width, 17)
+    s:SetMinMaxValues(minV, maxV)
+    s:SetValueStep(step)
+    if s.SetObeyStepOnDrag then s:SetObeyStepOnDrag(true) end
+    if s.Text and s.Text.SetText then s.Text:SetText("") end
+    if s.Low and s.Low.SetText then s.Low:SetText(minV .. "%") end
+    if s.High and s.High.SetText then s.High:SetText(maxV .. "%") end
+    return s
 end
 
 ------------------------------------------------------------------------
@@ -741,12 +815,20 @@ local OWN_ONLY_LABEL = "Only my own professions"
 local OWN_ONLY_TIP = "Show all professions this character has learned and no others. The list below is not used while this is on."
 
 -- Felter der redigeres i vinduet (ud over de fravalgte professions)
-local SETTING_KEYS = { "showMinimap", "maxPerProfession", "showUnlearned" }
+local SETTING_KEYS = { "showMinimap", "maxPerProfession", "showUnlearned", "tooltipTransparency" }
 for _, o in ipairs(OPTION_CHECKS) do SETTING_KEYS[#SETTING_KEYS + 1] = o.key end
+
+local TRANSPARENCY_STEP = 5
 
 local function NormValue(key, v)
     if key == "maxPerProfession" then
         return math.max(1, math.min(MAX_LINES, math.floor(tonumber(v) or DEFAULTS.maxPerProfession)))
+    end
+    if key == "tooltipTransparency" then
+        -- 0-100 %, afrundet til nærmeste trin
+        local n = tonumber(v) or DEFAULTS.tooltipTransparency
+        n = math.floor(n / TRANSPARENCY_STEP + 0.5) * TRANSPARENCY_STEP
+        return math.max(0, math.min(100, n))
     end
     return v and true or false
 end
@@ -904,6 +986,24 @@ local function BuildSettingsContent(parent, left, top, onSave, onCancel)
     end)
     yR = yR - 34
 
+    -- Baggrundens gennemsigtighed: tekst med værdien og en slider under
+    local fadeTitle = "Background transparency"
+    local fadeTip = "How see-through the dark background is in tooltips that show Reagent Skill Tips info. Text, icons and the border stay fully visible. 0% is the normal background."
+    local fadeLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    fadeLabel:SetPoint("TOPLEFT", right, yR)
+    yR = yR - 20
+    local fade = CreateSlider(parent, 200, 0, 100, TRANSPARENCY_STEP)
+    fade:SetPoint("TOPLEFT", right + 4, yR)
+    AddHoverTip(fade, fadeTitle, fadeTip)
+    fade:SetScript("OnValueChanged", function(_, value)
+        if ctl.refreshing then return end
+        local v = NormValue("tooltipTransparency", value)
+        if v == ctl.pending.values.tooltipTransparency then return end
+        ctl.pending.values.tooltipTransparency = v
+        ctl:Refresh()
+    end)
+    yR = yR - 34   -- plads til 0% / 100% under slideren
+
     local mm = CreateButton(parent, "", 210)
     mm:SetPoint("TOPLEFT", right, yR)
     mm:SetScript("OnClick", function()
@@ -960,6 +1060,10 @@ local function BuildSettingsContent(parent, left, top, onSave, onCancel)
         linesValue:SetText(tostring(v.maxPerProfession))
         if v.maxPerProfession > 1 then minus:Enable() else minus:Disable() end
         if v.maxPerProfession < MAX_LINES then plus:Enable() else plus:Disable() end
+        self.refreshing = true   -- SetValue må ikke udløse OnValueChanged-logikken
+        fade:SetValue(v.tooltipTransparency)
+        self.refreshing = false
+        fadeLabel:SetText(fadeTitle .. ": " .. v.tooltipTransparency .. "%")
         mm:SetText(v.showMinimap and "Minimap icon: Shown" or "Minimap icon: Hidden")
         if self:IsDirty() then
             status:SetText("|cffff8040Unsaved changes|r")
@@ -1144,6 +1248,7 @@ local function Help()
     print("  /rst on | off  - turn the tooltip info on or off")
     print("  /rst mine  - toggle: show only your own professions")
     print("  /rst lines <n>  - recipes per profession without Shift (now " .. S.maxPerProfession .. ")")
+    print("  /rst transparency <0-100>  - background transparency of tooltips with reagent info (now " .. S.tooltipTransparency .. "%)")
     print("  /rst counts  - toggle reagent counts (x2)")
     print("  /rst grey  - toggle: hide grey recipes")
     print("  /rst compact  - toggle: only icons until you hold Shift")
@@ -1178,6 +1283,9 @@ SlashHandler = function(msg)
         local n = tonumber(rest)
         if n and n >= 1 then S.maxPerProfession = math.min(MAX_LINES, math.floor(n)) end
         Print("recipes per profession: " .. S.maxPerProfession)
+    elseif cmd == "transparency" then
+        if tonumber(rest) then S.tooltipTransparency = NormValue("tooltipTransparency", rest) end
+        Print("tooltip background transparency: " .. S.tooltipTransparency .. "%")
     elseif cmd == "counts" then
         S.showCounts = not S.showCounts
         Print("counts " .. (S.showCounts and "on" or "off"))
