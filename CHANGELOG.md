@@ -4,6 +4,11 @@ Author: Boomsticky
 Game: World of Warcraft: Forever (interface 16001)
 Requires: nothing (the recipe data is built in)
 
+## 1.5.1 – 2026-11-17
+- "Background transparency" at 0% now gives a fully solid background. Before, 0% kept WoW's normal tooltip background, which is slightly see-through. In tooltips with reagent info the addon now draws its own background in the same colour, from fully solid (0%) to invisible (100%).
+- `/rst status` shows the current tooltip background values, to help with troubleshooting.
+- The version number is shown in small text in the bottom right corner of the settings.
+
 ## 1.5.0 – 2026-11-16
 - New slider in the settings: "Background transparency" (0–100%). It makes the dark background of tooltips that show Reagent Skill Tips info see-through, so you can see the game behind them. Text, icons and the border stay fully visible, and other tooltips are not changed. 0% is the normal background.
 - New command: `/rst transparency <0-100>`.

@@ -527,39 +527,59 @@ end
 
 -- Baggrundens gennemsigtighed. Bruges kun i tooltips, hvor addonet har
 -- tilføjet linjer, og nulstilles, når tooltippen ryddes eller skjules.
+-- 0 % giver en helt fast baggrund. Blizzards baggrundsbillede er selv en
+-- smule gennemsigtigt (også med alpha 1), så i moderne tooltips tegner vi
+-- vores egen ensfarvede baggrund i Blizzards farve og skjuler deres imens.
 -- Tekst, ikoner og kant røres ikke.
-local fadedTips = {}   -- [tooltip] = backdrop-alpha før ændringen (true ved NineSlice)
+local fadedTips = {}   -- [tooltip] = { kind, ... } med Blizzards værdier før ændringen
+local solidBg = {}     -- [tooltip] = vores egen baggrund (oprettes ved første brug)
+
+local function SolidBackground(tooltip, center)
+    local bg = solidBg[tooltip]
+    if not bg then
+        bg = tooltip.NineSlice:CreateTexture(nil, "BACKGROUND", nil, -8)
+        bg:SetAllPoints(center)
+        bg:Hide()
+        solidBg[tooltip] = bg
+    end
+    return bg
+end
 
 local function ResetTooltipFade(tooltip)
-    local before = fadedTips[tooltip]
-    if before == nil then return end
+    local saved = fadedTips[tooltip]
+    if not saved then return end
     fadedTips[tooltip] = nil
-    local center = tooltip.NineSlice and tooltip.NineSlice.Center
-    if center and center.SetAlpha then
-        center:SetAlpha(1)
-    elseif type(before) == "number" and tooltip.GetBackdropColor and tooltip.SetBackdropColor then
+    if saved.kind == "nineslice" then
+        local center = tooltip.NineSlice and tooltip.NineSlice.Center
+        if center then center:SetAlpha(saved.ta) end
+        if solidBg[tooltip] then solidBg[tooltip]:Hide() end
+    elseif saved.kind == "backdrop" then
         local r, g, b = tooltip:GetBackdropColor()
-        if r then tooltip:SetBackdropColor(r, g, b, before) end
+        if r then tooltip:SetBackdropColor(r, g, b, saved.a) end
     end
 end
 
 local function ApplyTooltipFade(tooltip)
-    local t = tonumber(S.tooltipTransparency) or 0
-    if t <= 0 then ResetTooltipFade(tooltip) return end
-    local alpha = 1 - math.min(t, 100) / 100
+    local t = math.max(0, math.min(100, tonumber(S.tooltipTransparency) or 0))
+    local alpha = 1 - t / 100
     local center = tooltip.NineSlice and tooltip.NineSlice.Center
-    if center and center.SetAlpha then
-        -- Moderne tooltips: baggrunden er NineSlice'ens midterstykke
-        center:SetAlpha(alpha)
-        fadedTips[tooltip] = true
+    if center and center.GetVertexColor and tooltip.NineSlice.CreateTexture then
+        -- Moderne tooltips: egen ensfarvet baggrund i Blizzards farve med den
+        -- valgte alpha, og Blizzards midterstykke skjules, mens den vises.
+        local r, g, b = center:GetVertexColor()
+        if not fadedTips[tooltip] then
+            fadedTips[tooltip] = { kind = "nineslice", ta = center:GetAlpha() or 1 }
+        end
+        local bg = SolidBackground(tooltip, center)
+        if bg.SetColorTexture then bg:SetColorTexture(r, g, b, alpha) else bg:SetTexture(r, g, b, alpha) end
+        bg:Show()
+        center:SetAlpha(0)
     elseif tooltip.GetBackdropColor and tooltip.SetBackdropColor then
-        -- Ældre tooltips med backdrop: skru ned for baggrundsfarvens alpha
+        -- Ældre tooltips med backdrop: baggrundsfarvens alpha sættes direkte
         local r, g, b, a = tooltip:GetBackdropColor()
         if r then
-            local before = fadedTips[tooltip]
-            if type(before) ~= "number" then before = a or 1 end
-            tooltip:SetBackdropColor(r, g, b, before * alpha)
-            fadedTips[tooltip] = before
+            if not fadedTips[tooltip] then fadedTips[tooltip] = { kind = "backdrop", a = a or 1 } end
+            tooltip:SetBackdropColor(r, g, b, alpha)
         end
     end
 end
@@ -988,7 +1008,7 @@ local function BuildSettingsContent(parent, left, top, onSave, onCancel)
 
     -- Baggrundens gennemsigtighed: tekst med værdien og en slider under
     local fadeTitle = "Background transparency"
-    local fadeTip = "How see-through the dark background is in tooltips that show Reagent Skill Tips info. Text, icons and the border stay fully visible. 0% is the normal background."
+    local fadeTip = "How see-through the dark background is in tooltips that show Reagent Skill Tips info. Text, icons and the border stay fully visible. 0% is a fully solid background."
     local fadeLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     fadeLabel:SetPoint("TOPLEFT", right, yR)
     yR = yR - 20
@@ -1130,6 +1150,11 @@ local function CreateSettingsFrame()
     title:SetPoint("TOP", 0, -20)
     title:SetText("Reagent Skill Tips")
 
+    -- Versionsnummeret i lille grå skrift nederst til højre
+    local version = f:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+    version:SetPoint("BOTTOMRIGHT", -18, 15)
+    version:SetText("v" .. VERSION)
+
     local okClose, close = pcall(CreateFrame, "Button", nil, f, "UIPanelCloseButton")
     if okClose and close then close:SetPoint("TOPRIGHT", -6, -6) end
 
@@ -1171,6 +1196,9 @@ local function RegisterOptionsPanel()
             local title = self:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
             title:SetPoint("TOPLEFT", 16, -16)
             title:SetText("Reagent Skill Tips")
+            local version = self:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
+            version:SetPoint("BOTTOMRIGHT", -16, 16)
+            version:SetText("v" .. VERSION)
             self.ctl = BuildSettingsContent(self, 18, -50,
                 function(_, status) status:SetText("|cff40bf40Saved|r") end,
                 nil)
@@ -1215,6 +1243,20 @@ local function Status()
     Print("version " .. VERSION .. ", tooltip info " .. (S.enabled and "on" or "off") .. " (settings are saved per character)")
     for _, err in ipairs(loadErrors) do Print("|cffff4040load error|r " .. err) end
     Print("recipe data: " .. tostring(ns and ns.dataSource or "NOT loaded"))
+    -- Tooltippens baggrund lige nu (Blizzards værdier, når vi ikke har ændret den)
+    pcall(function()
+        local center = GameTooltip and GameTooltip.NineSlice and GameTooltip.NineSlice.Center
+        if center and center.GetVertexColor then
+            local r, g, b, a = center:GetVertexColor()
+            local tex = (center.GetAtlas and center:GetAtlas()) or (center.GetTexture and center:GetTexture())
+            Print(string.format("tooltip background: NineSlice, colour %.2f %.2f %.2f alpha %.2f, texture alpha %.2f, texture %s, transparency setting %d%%",
+                r or -1, g or -1, b or -1, a or -1, center:GetAlpha() or -1, tostring(tex), S.tooltipTransparency or 0))
+        elseif GameTooltip and GameTooltip.GetBackdropColor then
+            local _, _, _, a = GameTooltip:GetBackdropColor()
+            Print(string.format("tooltip background: backdrop, alpha %.2f, transparency setting %d%%",
+                a or -1, S.tooltipTransparency or 0))
+        end
+    end)
     local ok, why = EnsureIndex()
     if ok then
         Print(string.format("Indexed %d recipes and %d reagents.", recipeCount, reagentCount))
