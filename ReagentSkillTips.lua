@@ -61,10 +61,8 @@ local L = {
     REAGENT_FOR = "Reagent for:",
     NOT_LEARNED = "not learned",
     MORE        = "+%d more recipes (hold Shift)",
-    SHIFT_HINT  = "(hold Shift)",
     ALL_GREY    = "all recipes are grey for you",
     SCAN_HINT   = "Open your profession window once to mark known recipes.",
-    UNCONFIRMED = "* skill requirement not yet confirmed for Forever",
     NO_DATA     = "the recipe data (Data.lua) was not loaded. Reinstall Reagent Skill Tips.",
 }
 
@@ -445,7 +443,7 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
     local icons = {}
     for i, p in ipairs(all) do icons[i] = IconString(p, 16) end
     local header = L.REAGENT_FOR .. " " .. table.concat(icons, " ")
-    tooltip:AddLine(" ")
+    -- Ingen tom linje før "Reagent for:", så den ligger lige under spillets linjer
 
     -- Filteret skjuler alle professions: kun ikonlinjen (Shift viser ikke mere)
     if #order == 0 then
@@ -453,14 +451,15 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
         return true
     end
 
-    -- Kompakt visning: uden Shift kun ikonlinjen
+    -- Kompakt visning: uden Shift kun ikonlinjen (uden "hold Shift", så
+    -- tooltippen ikke bliver bredere; det står i indstillingerne i stedet)
     if S.compact and not expanded then
-        tooltip:AddLine(header .. "  |cff808080" .. L.SHIFT_HINT .. "|r", 1, 0.82, 0)
+        tooltip:AddLine(header, 1, 0.82, 0)
         return true
     end
     tooltip:AddLine(header, 1, 0.82, 0)
 
-    local hidden, starred, needScan = 0, false, false
+    local hidden, needScan = 0, false
     for _, p in ipairs(order) do
         local g, skill = groups[p], skills[p]
 
@@ -511,7 +510,6 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
             end
             if showNumbers then
                 tooltip:AddDoubleLine(left, TierText(e))
-                if e.starred then starred = true end
             else
                 tooltip:AddLine(left)
             end
@@ -519,8 +517,9 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
         hidden = hidden + (#g - #shown)
     end
 
+    -- "*" efter et tal (krav lånt fra Vanilla) forklares ikke i tooltippen,
+    -- så den holdes kort. Forklaringen står i README og på CurseForge.
     if hidden > 0 then tooltip:AddLine(string.format(L.MORE, hidden), 0.6, 0.6, 0.6) end
-    if starred then tooltip:AddLine(L.UNCONFIRMED, 0.6, 0.6, 0.6) end
     if needScan then tooltip:AddLine(L.SCAN_HINT, 0.6, 0.6, 0.6) end
     return true
 end
@@ -528,19 +527,21 @@ end
 -- Baggrundens gennemsigtighed. Bruges kun i tooltips, hvor addonet har
 -- tilføjet linjer, og nulstilles, når tooltippen ryddes eller skjules.
 -- 0 % giver en helt fast baggrund. Blizzards baggrundsbillede er selv en
--- smule gennemsigtigt (også med alpha 1), så i moderne tooltips tegner vi
--- vores egen ensfarvede baggrund i Blizzards farve og skjuler deres imens.
+-- smule gennemsigtigt (også med alpha 1). I moderne tooltips beholder vi
+-- derfor Blizzards baggrund (samme farve og mønster) og lægger et sort lag
+-- bag den. Begge får den valgte alpha, så 0 % ser ud som Blizzards tooltip
+-- over en mørk baggrund, og 100 % er helt gennemsigtig.
 -- Tekst, ikoner og kant røres ikke.
 local fadedTips = {}   -- [tooltip] = { kind, ... } med Blizzards værdier før ændringen
-local solidBg = {}     -- [tooltip] = vores egen baggrund (oprettes ved første brug)
+local backing = {}     -- [tooltip] = vores sorte lag bag Blizzards baggrund
 
-local function SolidBackground(tooltip, center)
-    local bg = solidBg[tooltip]
+local function Backing(tooltip)
+    local bg = backing[tooltip]
     if not bg then
+        -- Nederste lag i NineSlice-rammen. Blizzards midterstykke ligger over.
         bg = tooltip.NineSlice:CreateTexture(nil, "BACKGROUND", nil, -8)
-        bg:SetAllPoints(center)
         bg:Hide()
-        solidBg[tooltip] = bg
+        backing[tooltip] = bg
     end
     return bg
 end
@@ -551,8 +552,11 @@ local function ResetTooltipFade(tooltip)
     fadedTips[tooltip] = nil
     if saved.kind == "nineslice" then
         local center = tooltip.NineSlice and tooltip.NineSlice.Center
-        if center then center:SetAlpha(saved.ta) end
-        if solidBg[tooltip] then solidBg[tooltip]:Hide() end
+        if center then
+            center:SetAlpha(saved.ta)
+            if saved.layer then center:SetDrawLayer(saved.layer, saved.sub or 0) end
+        end
+        if backing[tooltip] then backing[tooltip]:Hide() end
     elseif saved.kind == "backdrop" then
         local r, g, b = tooltip:GetBackdropColor()
         if r then tooltip:SetBackdropColor(r, g, b, saved.a) end
@@ -563,17 +567,25 @@ local function ApplyTooltipFade(tooltip)
     local t = math.max(0, math.min(100, tonumber(S.tooltipTransparency) or 0))
     local alpha = 1 - t / 100
     local center = tooltip.NineSlice and tooltip.NineSlice.Center
-    if center and center.GetVertexColor and tooltip.NineSlice.CreateTexture then
-        -- Moderne tooltips: egen ensfarvet baggrund i Blizzards farve med den
-        -- valgte alpha, og Blizzards midterstykke skjules, mens den vises.
-        local r, g, b = center:GetVertexColor()
-        if not fadedTips[tooltip] then
-            fadedTips[tooltip] = { kind = "nineslice", ta = center:GetAlpha() or 1 }
+    if center and center.SetAlpha and center.GetDrawLayer and tooltip.NineSlice.CreateTexture then
+        -- Moderne tooltips: sort lag bag Blizzards midterstykke, begge med
+        -- den valgte alpha
+        local saved = fadedTips[tooltip]
+        if not saved then
+            local layer, sub = center:GetDrawLayer()
+            saved = { kind = "nineslice", ta = center:GetAlpha() or 1, layer = layer, sub = sub }
+            fadedTips[tooltip] = saved
         end
-        local bg = SolidBackground(tooltip, center)
-        if bg.SetColorTexture then bg:SetColorTexture(r, g, b, alpha) else bg:SetTexture(r, g, b, alpha) end
+        -- Blizzards midterstykke skal tegnes over det sorte lag
+        if saved.layer == "BACKGROUND" and (tonumber(saved.sub) or 0) <= -8 then
+            center:SetDrawLayer("BACKGROUND", -7)
+        end
+        local bg = Backing(tooltip)
+        bg:ClearAllPoints()
+        bg:SetAllPoints(center)
+        if bg.SetColorTexture then bg:SetColorTexture(0, 0, 0, alpha) else bg:SetTexture(0, 0, 0, alpha) end
         bg:Show()
-        center:SetAlpha(0)
+        center:SetAlpha(alpha)
     elseif tooltip.GetBackdropColor and tooltip.SetBackdropColor then
         -- Ældre tooltips med backdrop: baggrundsfarvens alpha sættes direkte
         local r, g, b, a = tooltip:GetBackdropColor()
@@ -822,8 +834,8 @@ local OPTION_CHECKS = {
       tip = "Show how many of the item a recipe uses, when it is more than one." },
     { key = "hideGrey",      label = "Hide grey recipes",
       tip = "Hide recipes that give no skill-ups in your own professions. Hold Shift to see them." },
-    { key = "compact",       label = "Compact view",
-      tip = "Show only the profession icons. Hold Shift to see the recipes." },
+    { key = "compact",       label = "Compact (Shift shows recipes)",
+      tip = "Show only the \"Reagent for\" line with the profession icons. Hold Shift while you hover over an item to see the recipes." },
     { key = "hideNumbers",   label = "Hide skill numbers",
       tip = "Show only the coloured recipe names, without the four skill levels." },
     { key = "showKnown",     label = "Mark known recipes",
@@ -1249,8 +1261,9 @@ local function Status()
         if center and center.GetVertexColor then
             local r, g, b, a = center:GetVertexColor()
             local tex = (center.GetAtlas and center:GetAtlas()) or (center.GetTexture and center:GetTexture())
-            Print(string.format("tooltip background: NineSlice, colour %.2f %.2f %.2f alpha %.2f, texture alpha %.2f, texture %s, transparency setting %d%%",
-                r or -1, g or -1, b or -1, a or -1, center:GetAlpha() or -1, tostring(tex), S.tooltipTransparency or 0))
+            local layer, sub = center:GetDrawLayer()
+            Print(string.format("tooltip background: NineSlice, colour %.2f %.2f %.2f alpha %.2f, texture alpha %.2f, texture %s, layer %s %s, transparency setting %d%%",
+                r or -1, g or -1, b or -1, a or -1, center:GetAlpha() or -1, tostring(tex), tostring(layer), tostring(sub), S.tooltipTransparency or 0))
         elseif GameTooltip and GameTooltip.GetBackdropColor then
             local _, _, _, a = GameTooltip:GetBackdropColor()
             Print(string.format("tooltip background: backdrop, alpha %.2f, transparency setting %d%%",

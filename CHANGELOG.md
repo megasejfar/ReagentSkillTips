@@ -4,6 +4,12 @@ Author: Boomsticky
 Game: World of Warcraft: Forever (interface 16001)
 Requires: nothing (the recipe data is built in)
 
+## 1.5.2 – 2026-11-18
+- The tooltip background now has the same colour as WoW's own tooltips. The addon keeps WoW's background and puts a black layer behind it, so 0% transparency is fully solid without changing the colour.
+- No blank line between the game's lines (for example "Sell price") and "Reagent for:".
+- Compact view no longer shows "(hold Shift)" in the tooltip, so it stays narrow. The option is now called "Compact (Shift shows recipes)" in the settings.
+- The line "* skill requirement not yet confirmed for Forever" is no longer added to tooltips. The `*` after a skill level still marks a requirement borrowed from Vanilla.
+
 ## 1.5.1 – 2026-11-17
 - "Background transparency" at 0% now gives a fully solid background. Before, 0% kept WoW's normal tooltip background, which is slightly see-through. In tooltips with reagent info the addon now draws its own background in the same colour, from fully solid (0%) to invisible (100%).
 - `/rst status` shows the current tooltip background values, to help with troubleshooting.
