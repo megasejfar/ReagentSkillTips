@@ -4,6 +4,13 @@ Author: Boomsticky
 Game: World of Warcraft: Forever (interface 16001)
 Requires: nothing (the recipe data is built in)
 
+## 1.6.0 – 2026-11-20
+- Class spell reagents: the tooltip now also shows which class spells use the item, for example Light Feather for Slow Fall (Mage) and Levitate (Priest), Shiny Fish Scales for Water Breathing (Shaman) and Soul Shards for Warlock spells. Rogue poisons are included.
+- The class icons are shown in the "Reagent for" line next to the profession icons. Each class gets a section in its class colour with the spells and the level they are learned at. Ranks of the same spell are shown as one line. Spells your own class is not high enough level for are shown in red.
+- New setting "Class spells" (a dropdown): All classes, Only my class or Off. New command: `/rst classes [all | mine | off]`.
+- "Show minimap icon" is now a checkbox in the settings instead of a button.
+- The class data comes from WoW: Forever's own client data (build 1.60.1.69977). `/rst status` shows it.
+
 ## 1.5.2 – 2026-11-18
 - The tooltip background now has the same colour as WoW's own tooltips. The addon keeps WoW's background and puts a black layer behind it, so 0% transparency is fully solid without changing the colour.
 - No blank line between the game's lines (for example "Sell price") and "Reagent for:".

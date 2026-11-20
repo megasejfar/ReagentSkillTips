@@ -1,6 +1,6 @@
 # Reagent Skill Tips
 
-A World of Warcraft: Forever addon that shows in the item tooltip what a crafting reagent is used for: which professions, which recipes and at which skill levels. The recipes are coloured for your character's current skill, so you can see at a glance whether a material is useful for levelling a profession.
+A World of Warcraft: Forever addon that shows in the item tooltip what a reagent is used for: which professions, which recipes and at which skill levels, and which class spells use it. The recipes are coloured for your character's current skill, so you can see at a glance whether a material is useful for levelling a profession.
 
 Author: Boomsticky · Game: WoW: Forever (interface 16001) · License: MIT
 
@@ -23,7 +23,8 @@ The four numbers are the skill levels where the recipe turns **orange, yellow, g
 - **No dependencies.** The data for every recipe in the game is built in, not only the ones your character knows.
 - **Profession icons** for every profession that uses the item – also the ones you have filtered out.
 - **Known recipes are marked** with a green check, unknown ones with a red cross. Open each profession window once so the addon can see your recipes.
-- Your own professions are listed first. `x2` shows when a recipe uses more than one of the item.
+- **Class spell reagents**, for example Light Feather for Slow Fall (Mage) and Levitate (Priest), Shiny Fish Scales for Water Breathing, Soul Shards and Rogue poisons. Each class is shown in its class colour with the level the spell is learned at. Spells your own class is not high enough level for are red.
+- Your own professions and class are listed first. `x2` shows when a recipe or spell uses more than one of the item.
 - **Hold Shift** to see all recipes. Without Shift, the list starts at the first recipe that is not grey for you.
 - Works in normal item tooltips and in chat links.
 
@@ -46,6 +47,7 @@ Click the minimap button, or open **Esc → Options → AddOns → Reagent Skill
 - Show info in tooltips, only my own professions, reagent counts (x2), hide grey recipes, compact view (only icons until you hold Shift), hide skill numbers and mark known recipes.
 - Choose how many recipes are shown without Shift (1–30).
 - Background transparency (0–100%) of tooltips that show Reagent Skill Tips info: 0% is a fully solid background. Text, icons and the border stay fully visible.
+- Class spells: all classes, only your class, or off.
 - Show or hide the minimap button.
 
 Changes are saved when you click **Save**. Settings are saved per character.
@@ -60,6 +62,7 @@ Changes are saved when you click **Save**. Settings are saved per character.
 | `/rst item <itemID or link>` | Print the info for an item in chat |
 | `/rst known` | Turn the check/cross marks on or off |
 | `/rst transparency <0-100>` | Set the background transparency of tooltips with reagent info |
+| `/rst classes [all \| mine \| off]` | Class spells in tooltips: all classes, only your class or off |
 | `/rst status` | Check the recipe data, your skills and known recipes |
 | `/rst debug` | Show error messages in chat |
 
@@ -81,6 +84,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-data.ps1
 ```
 
 The script reads `World of Warcraft\_forever_\Interface\AddOns\ProfessionDB` (use `-ProfessionDB <folder>` for another location), takes only the fields the addon uses, and rewrites `Data.lua`. It stops with an error instead of writing a broken file if the data format has changed. `/rst status` in the game shows which data version is built in.
+
+The class spell data in `ClassData.lua` is generated from WoW: Forever's own client data. Export these four tables as CSV from [wago.tools](https://wago.tools) for the Forever build (the "CSV" button on each table page): `SpellReagents`, `SkillLineAbility`, `SkillLine` and `SpellLevels`. Put them in one folder (default: `wago-<build>` next to the repository folder) and run:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-class-data.ps1 -Build 1.60.1.69977
+```
+
+Use `-Wago <folder>` for another location. The script takes the spells of the class skill lines (and Rogue poisons), links them to their reagents and levels, and checks a few known cases (Light Feather for Slow Fall and Levitate, Fish Oil for Water Walking) before it writes `ClassData.lua`.
 
 ## Contributing
 

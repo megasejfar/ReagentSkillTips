@@ -2,11 +2,12 @@
 ## Title: Reagent Skill Tips
 ## Notes: Shows which professions, recipes and skill levels a reagent is used for.
 ## Author: Boomsticky
-## Version: 1.5.2
+## Version: 1.6.0
 ## X-Curse-Project-ID: 1802307
 ## SavedVariablesPerCharacter: ReagentSkillTipsCharDB
 ## IconTexture: Interface\AddOns\ReagentSkillTips\Media\MinimapIcon
 ## AddonCompartmentFunc: ReagentSkillTips_OnAddonCompartmentClick
 
 Data.lua
+ClassData.lua
 ReagentSkillTips.lua

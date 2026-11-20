@@ -51,6 +51,7 @@ local DEFAULTS = {
     hideNumbers      = false, -- skjul de fire skill-tal
     showKnown        = true,  -- flueben ved kendte, kryds ved ukendte opskrifter
     tooltipTransparency = 0,  -- baggrundens gennemsigtighed i tooltips med reagent-info (0-100 %)
+    classSpells      = "all", -- class-spells i tooltippen: "all", "mine" eller "off"
     showMinimap      = true,  -- vis knappen ved minimap
     minimapAngle     = 220,   -- knappens placering rundt om minimap (grader)
     debug            = false,
@@ -60,7 +61,9 @@ local MAX_LINES = 30          -- øvre grænse for maxPerProfession
 local L = {
     REAGENT_FOR = "Reagent for:",
     NOT_LEARNED = "not learned",
-    MORE        = "+%d more recipes (hold Shift)",
+    MORE        = "+%d more (hold Shift)",
+    YOUR_CLASS  = "your class",
+    LEVEL       = "level %d",
     ALL_GREY    = "all recipes are grey for you",
     SCAN_HINT   = "Open your profession window once to mark known recipes.",
     NO_DATA     = "the recipe data (Data.lua) was not loaded. Reinstall Reagent Skill Tips.",
@@ -384,15 +387,92 @@ local function TierText(e)
 end
 
 ------------------------------------------------------------------------
+-- Class-spells. ClassData.lua bygges af tools/build-class-data.ps1 ud fra
+-- Forevers egne klientdata: [itemID] = { { s = spell, c = class, l = level, n = antal } }
+------------------------------------------------------------------------
+
+local CLASS_ICON_FILE = "Interface\\GLUES\\CHARACTERCREATE\\UI-CHARACTERCREATE-CLASSES"
+
+local function ClassIcon(token, size)
+    local c = CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[token]
+    if not c then return "" end
+    local function px(v) return math.floor(v * 256 + 0.5) end
+    return string.format("|T%s:%d:%d:0:0:256:256:%d:%d:%d:%d|t", CLASS_ICON_FILE, size, size,
+        px(c[1]), px(c[2]), px(c[3]), px(c[4]))
+end
+
+local function ClassName(token)
+    local name = LOCALIZED_CLASS_NAMES_MALE and LOCALIZED_CLASS_NAMES_MALE[token]
+    if type(name) == "string" then return name end
+    return token:sub(1, 1) .. token:sub(2):lower()
+end
+
+local function ClassColorHex(token)
+    local c = (CUSTOM_CLASS_COLORS and CUSTOM_CLASS_COLORS[token]) or (RAID_CLASS_COLORS and RAID_CLASS_COLORS[token])
+    if c and c.r then
+        local function hex(v) return math.floor(v * 255 + 0.5) end
+        return string.format("%02x%02x%02x", hex(c.r), hex(c.g), hex(c.b))
+    end
+    return "ffd100"
+end
+
+local function PlayerClass()
+    if not UnitClass then return nil end
+    local _, token = UnitClass("player")
+    return token
+end
+
+-- Itemets class-spells, samlet pr. class og spellnavn (ranks bliver til én
+-- linje med det laveste level). Resultatet gemmes, da det ikke ændrer sig.
+local classCache = {}
+local function ClassUses(itemID)
+    local data = ns and ns.classReagents and ns.classReagents[itemID]
+    if not data then return nil end
+    if classCache[itemID] then return classCache[itemID] end
+
+    local byClass, list = {}, {}
+    for _, u in ipairs(data) do
+        local c = byClass[u.c]
+        if not c then
+            c = { token = u.c, spells = {}, byName = {} }
+            byClass[u.c] = c
+            list[#list + 1] = c
+        end
+        local name = RecipeName(u.s, { n = "Spell " .. u.s })
+        local sp = c.byName[name]
+        if not sp then
+            sp = { name = name, level = u.l, minN = u.n or 1, maxN = u.n or 1 }
+            c.byName[name] = sp
+            c.spells[#c.spells + 1] = sp
+        else
+            if u.l and (not sp.level or u.l < sp.level) then sp.level = u.l end
+            sp.minN = math.min(sp.minN, u.n or 1)
+            sp.maxN = math.max(sp.maxN, u.n or 1)
+        end
+    end
+    for _, c in ipairs(list) do
+        table.sort(c.spells, function(a, b)
+            if (a.level or 0) ~= (b.level or 0) then return (a.level or 0) < (b.level or 0) end
+            return a.name < b.name
+        end)
+    end
+    classCache[itemID] = list
+    return list
+end
+
+------------------------------------------------------------------------
 -- Tooltip
 ------------------------------------------------------------------------
 
 local function AddReagentInfo(tooltip, itemID, forceExpanded)
     if not S.enabled and not forceExpanded then return false end
-    if not EnsureIndex() then return false end
 
-    local list = index[itemID]
-    if not list then return false end
+    -- Opskrifter (professions) og class-spells, der bruger itemet
+    local list = EnsureIndex() and index[itemID] or nil
+    local classMode = forceExpanded and "all" or S.classSpells
+    local classUses = classMode ~= "off" and ClassUses(itemID) or nil
+    if not list and not classUses then return false end
+    list = list or {}
 
     local skills, localNames = GetPlayerSkills()
 
@@ -435,18 +515,36 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
     table.sort(order, OwnFirst)
     table.sort(all, OwnFirst)
 
+    -- Class-spells: ikonerne viser alle classes, der bruger itemet, og
+    -- indstillingen bestemmer, hvilke classes der får en sektion. Din egen
+    -- class først, derefter alfabetisk.
+    local playerClass = PlayerClass()
+    local classAll, classShown = classUses or {}, {}
+    table.sort(classAll, function(a, b)
+        local oa, ob = a.token == playerClass, b.token == playerClass
+        if oa ~= ob then return oa end
+        return ClassName(a.token) < ClassName(b.token)
+    end)
+    for _, c in ipairs(classAll) do
+        if classMode == "all" or c.token == playerClass then classShown[#classShown + 1] = c end
+    end
+
     local expanded = forceExpanded or (IsShiftKeyDown and IsShiftKeyDown())
     local maxLines = math.max(1, tonumber(S.maxPerProfession) or DEFAULTS.maxPerProfession)
     local showNumbers = forceExpanded or not S.hideNumbers
 
-    -- Overskrift med ikoner for alle professions, også dem filteret skjuler
+    -- Overskrift med ikoner for alle professions og classes, også dem filteret skjuler
     local icons = {}
     for i, p in ipairs(all) do icons[i] = IconString(p, 16) end
+    for _, c in ipairs(classAll) do
+        local icon = ClassIcon(c.token, 16)
+        if icon ~= "" then icons[#icons + 1] = icon end
+    end
     local header = L.REAGENT_FOR .. " " .. table.concat(icons, " ")
     -- Ingen tom linje før "Reagent for:", så den ligger lige under spillets linjer
 
-    -- Filteret skjuler alle professions: kun ikonlinjen (Shift viser ikke mere)
-    if #order == 0 then
+    -- Filteret skjuler alt: kun ikonlinjen (Shift viser ikke mere)
+    if #order == 0 and #classShown == 0 then
         tooltip:AddLine(header, 1, 0.82, 0)
         return true
     end
@@ -515,6 +613,34 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
             end
         end
         hidden = hidden + (#g - #shown)
+    end
+
+    -- Class-spells: class-navn i class-farve, derefter spells med level.
+    -- Spells, din egen class endnu ikke har level til, vises med rødt.
+    local playerLevel = UnitLevel and UnitLevel("player") or nil
+    for _, c in ipairs(classShown) do
+        local own = c.token == playerClass
+        local right = own and ("|cffffffff" .. L.YOUR_CLASS .. "|r") or ""
+        tooltip:AddDoubleLine(ClassIcon(c.token, 14) .. " |cff" .. ClassColorHex(c.token) .. ClassName(c.token) .. "|r", right)
+
+        local count = #c.spells
+        if not expanded and count > maxLines then count = maxLines end
+        for i = 1, count do
+            local sp = c.spells[i]
+            local color = COLOR.white
+            if own and sp.level and playerLevel and playerLevel < sp.level then color = COLOR.red end
+            local left = "    |cff" .. color .. sp.name .. "|r"
+            if S.showCounts and sp.maxN > 1 then
+                local n = (sp.minN == sp.maxN) and tostring(sp.maxN) or (sp.minN .. "-" .. sp.maxN)
+                left = left .. " |cffbbbbbbx" .. n .. "|r"
+            end
+            if showNumbers and sp.level then
+                tooltip:AddDoubleLine(left, "|cffbbbbbb" .. string.format(L.LEVEL, sp.level) .. "|r")
+            else
+                tooltip:AddLine(left)
+            end
+        end
+        hidden = hidden + (#c.spells - count)
     end
 
     -- "*" efter et tal (krav lånt fra Vanilla) forklares ikke i tooltippen,
@@ -724,6 +850,68 @@ local function CreateSlider(parent, width, minV, maxV, step)
     return s
 end
 
+-- Dropdown med faste valg: choices = { { value = ..., text = ... }, ... }.
+-- Nyere klienter har "WowStyle1DropdownTemplate" (menu-API), ældre
+-- "UIDropDownMenuTemplate". Findes ingen af dem, bliver det en knap, der
+-- skifter mellem valgene. Returnerer { frame, xOffset, Refresh }.
+local dropdownCount = 0
+local function CreateChoiceDropdown(parent, width, choices, getValue, setValue)
+    local function TextOf(v)
+        for _, c in ipairs(choices) do
+            if c.value == v then return c.text end
+        end
+        return ""
+    end
+
+    -- Ny menu-API
+    local ok, dd = pcall(CreateFrame, "DropdownButton", nil, parent, "WowStyle1DropdownTemplate")
+    if ok and dd and dd.SetupMenu then
+        dd:SetWidth(width)
+        dd:SetupMenu(function(_, root)
+            for _, c in ipairs(choices) do
+                root:CreateRadio(c.text,
+                    function() return getValue() == c.value end,
+                    function() setValue(c.value) end)
+            end
+        end)
+        return { frame = dd, xOffset = 0, Refresh = function() if dd.GenerateMenu then dd:GenerateMenu() end end }
+    elseif ok and dd and dd.Hide then
+        dd:Hide()   -- rammetypen fandtes, men ikke skabelonen
+    end
+
+    -- Ældre UIDropDownMenu (skal have et globalt navn)
+    if UIDropDownMenu_Initialize and UIDropDownMenu_AddButton then
+        dropdownCount = dropdownCount + 1
+        local okOld, old = pcall(CreateFrame, "Frame", "ReagentSkillTipsDropdown" .. dropdownCount, parent, "UIDropDownMenuTemplate")
+        if okOld and old then
+            if UIDropDownMenu_SetWidth then UIDropDownMenu_SetWidth(old, width - 30) end
+            UIDropDownMenu_Initialize(old, function(_, level)
+                for _, c in ipairs(choices) do
+                    local info = (UIDropDownMenu_CreateInfo and UIDropDownMenu_CreateInfo()) or {}
+                    info.text, info.value = c.text, c.value
+                    info.checked = getValue() == c.value
+                    info.func = function() setValue(c.value) end
+                    UIDropDownMenu_AddButton(info, level)
+                end
+            end)
+            return { frame = old, xOffset = -16, Refresh = function()
+                if UIDropDownMenu_SetText then UIDropDownMenu_SetText(old, TextOf(getValue())) end
+            end }
+        end
+    end
+
+    -- Reserve: knap der skifter mellem valgene
+    local b = CreateButton(parent, "", width)
+    b:SetScript("OnClick", function()
+        local cur, nextValue = getValue(), choices[1].value
+        for i, c in ipairs(choices) do
+            if c.value == cur then nextValue = choices[i % #choices + 1].value end
+        end
+        setValue(nextValue)
+    end)
+    return { frame = b, xOffset = 0, Refresh = function() b:SetText(TextOf(getValue())) end }
+end
+
 ------------------------------------------------------------------------
 -- Minimap-knap
 ------------------------------------------------------------------------
@@ -847,12 +1035,20 @@ local OWN_ONLY_LABEL = "Only my own professions"
 local OWN_ONLY_TIP = "Show all professions this character has learned and no others. The list below is not used while this is on."
 
 -- Felter der redigeres i vinduet (ud over de fravalgte professions)
-local SETTING_KEYS = { "showMinimap", "maxPerProfession", "showUnlearned", "tooltipTransparency" }
+local SETTING_KEYS = { "showMinimap", "maxPerProfession", "showUnlearned", "tooltipTransparency", "classSpells" }
 for _, o in ipairs(OPTION_CHECKS) do SETTING_KEYS[#SETTING_KEYS + 1] = o.key end
 
 local TRANSPARENCY_STEP = 5
 
+-- Class-spells i tooltippen: knappen skifter i denne rækkefølge
+local CLASS_MODES = { "all", "mine", "off" }
+local CLASS_MODE_TEXT = { all = "All classes", mine = "Only my class", off = "Off" }
+
 local function NormValue(key, v)
+    if key == "classSpells" then
+        if CLASS_MODE_TEXT[v] then return v end
+        return DEFAULTS.classSpells
+    end
     if key == "maxPerProfession" then
         return math.max(1, math.min(MAX_LINES, math.floor(tonumber(v) or DEFAULTS.maxPerProfession)))
     end
@@ -1036,13 +1232,47 @@ local function BuildSettingsContent(parent, left, top, onSave, onCancel)
     end)
     yR = yR - 34   -- plads til 0% / 100% under slideren
 
-    local mm = CreateButton(parent, "", 210)
-    mm:SetPoint("TOPLEFT", right, yR)
-    mm:SetScript("OnClick", function()
-        ctl.pending.values.showMinimap = not ctl.pending.values.showMinimap
+    -- Class-spells: overskrift og en dropdown med alle classes, kun min class og fra
+    local clsTitle = "Class spells"
+    local clsTip = "Show which class spells use the item as a reagent, for example Light Feather for Slow Fall and Levitate."
+    local clsLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    clsLabel:SetPoint("TOPLEFT", right, yR)
+    clsLabel:SetText(clsTitle)
+    yR = yR - 18
+    local clsChoices = {}
+    for _, m in ipairs(CLASS_MODES) do clsChoices[#clsChoices + 1] = { value = m, text = CLASS_MODE_TEXT[m] } end
+    local cls = CreateChoiceDropdown(parent, 180, clsChoices,
+        function() return ctl.pending.values.classSpells end,
+        function(v)
+            ctl.pending.values.classSpells = v
+            ctl:Refresh()
+        end)
+    cls.frame:SetPoint("TOPLEFT", right + cls.xOffset, yR)
+    if cls.frame.HookScript then
+        cls.frame:HookScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+            GameTooltip:SetText(clsTitle, 1, 1, 1)
+            GameTooltip:AddLine(clsTip, 1, 0.82, 0, true)
+            GameTooltip:Show()
+        end)
+        cls.frame:HookScript("OnLeave", function() GameTooltip:Hide() end)
+    end
+    yR = yR - 36
+
+    -- Minimap-ikonet: checkbox
+    local mmTitle = "Show minimap icon"
+    local mm = CreateCheckbox(parent)
+    mm:SetPoint("TOPLEFT", right - 2, yR)
+    local mmLabel = parent:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    mmLabel:SetPoint("LEFT", mm, "RIGHT", 4, 0)
+    mmLabel:SetText(mmTitle)
+    mm:SetHitRectInsets(0, -190, 0, 0)
+    mm:SetScript("OnClick", function(self)
+        ctl.pending.values.showMinimap = self:GetChecked() and true or false
         ctl:Refresh()
     end)
-    yR = yR - 34
+    AddHoverTip(mm, mmTitle, "Show the Reagent Skill Tips button at the minimap. You can always open the settings with /rst config.")
+    yR = yR - ROW_H - 8
 
     -- Save / Cancel under den længste kolonne
     local y = math.min(yL, yR) - 10
@@ -1096,7 +1326,8 @@ local function BuildSettingsContent(parent, left, top, onSave, onCancel)
         fade:SetValue(v.tooltipTransparency)
         self.refreshing = false
         fadeLabel:SetText(fadeTitle .. ": " .. v.tooltipTransparency .. "%")
-        mm:SetText(v.showMinimap and "Minimap icon: Shown" or "Minimap icon: Hidden")
+        cls:Refresh()
+        mm:SetChecked(v.showMinimap and true or false)
         if self:IsDirty() then
             status:SetText("|cffff8040Unsaved changes|r")
         else
@@ -1255,6 +1486,9 @@ local function Status()
     Print("version " .. VERSION .. ", tooltip info " .. (S.enabled and "on" or "off") .. " (settings are saved per character)")
     for _, err in ipairs(loadErrors) do Print("|cffff4040load error|r " .. err) end
     Print("recipe data: " .. tostring(ns and ns.dataSource or "NOT loaded"))
+    local classItems = 0
+    for _ in pairs(ns and ns.classReagents or {}) do classItems = classItems + 1 end
+    Print("class spell data: " .. tostring(ns and ns.classSource or "NOT loaded") .. ", " .. classItems .. " reagents")
     -- Tooltippens baggrund lige nu (Blizzards værdier, når vi ikke har ændret den)
     pcall(function()
         local center = GameTooltip and GameTooltip.NineSlice and GameTooltip.NineSlice.Center
@@ -1304,6 +1538,7 @@ local function Help()
     print("  /rst mine  - toggle: show only your own professions")
     print("  /rst lines <n>  - recipes per profession without Shift (now " .. S.maxPerProfession .. ")")
     print("  /rst transparency <0-100>  - background transparency of tooltips with reagent info (now " .. S.tooltipTransparency .. "%)")
+    print("  /rst classes [all | mine | off]  - class spells in tooltips (now " .. CLASS_MODE_TEXT[NormValue("classSpells", S.classSpells)] .. ")")
     print("  /rst counts  - toggle reagent counts (x2)")
     print("  /rst grey  - toggle: hide grey recipes")
     print("  /rst compact  - toggle: only icons until you hold Shift")
@@ -1341,6 +1576,17 @@ SlashHandler = function(msg)
     elseif cmd == "transparency" then
         if tonumber(rest) then S.tooltipTransparency = NormValue("tooltipTransparency", rest) end
         Print("tooltip background transparency: " .. S.tooltipTransparency .. "%")
+    elseif cmd == "classes" then
+        local want = (rest or ""):lower()
+        if CLASS_MODE_TEXT[want] then
+            S.classSpells = want
+        else
+            local cur = NormValue("classSpells", S.classSpells)
+            for i, m in ipairs(CLASS_MODES) do
+                if m == cur then S.classSpells = CLASS_MODES[i % #CLASS_MODES + 1] end
+            end
+        end
+        Print("class spells: " .. CLASS_MODE_TEXT[NormValue("classSpells", S.classSpells)])
     elseif cmd == "counts" then
         S.showCounts = not S.showCounts
         Print("counts " .. (S.showCounts and "on" or "off"))
