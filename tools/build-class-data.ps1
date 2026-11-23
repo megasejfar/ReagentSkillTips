@@ -13,7 +13,10 @@
     ClassData.lua og stopper med en fejl, hvis en tabel eller kolonne mangler.
 #>
 param(
-    [string]$Build = "1.60.1.69977",
+    # Forever-build (standard: det build, spillet kører, fra WoW-mappens .build.info)
+    [string]$Build = "",
+    # WoW-mappen (bruges kun til at finde spillets build)
+    [string]$WoW = "C:\Program Files (x86)\World of Warcraft",
     # Mappen med de fire CSV-filer
     [string]$Wago = "",
     # Filen der skrives
@@ -24,6 +27,19 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version 2
 
 $repo = Split-Path $PSScriptRoot -Parent
+if (-not $Build) {
+    $buildInfo = Join-Path $WoW ".build.info"
+    if (Test-Path -LiteralPath $buildInfo) {
+        $biLines = @(Get-Content -LiteralPath $buildInfo)
+        $hdr = @($biLines[0].Split('|') | ForEach-Object { $_.Split('!')[0] })
+        $pi = [array]::IndexOf($hdr, "Product"); $vi = [array]::IndexOf($hdr, "Version")
+        foreach ($l in ($biLines | Select-Object -Skip 1)) {
+            $f = $l.Split('|')
+            if ($pi -ge 0 -and $vi -ge 0 -and $f.Count -gt [Math]::Max($pi, $vi) -and $f[$pi] -eq "wowf") { $Build = $f[$vi] }
+        }
+    }
+    if (-not $Build) { throw "Kunne ikke finde spillets build i $buildInfo. Angiv det med -Build." }
+}
 if (-not $Wago) { $Wago = Join-Path (Split-Path $repo -Parent) "wago-$Build" }
 $Out = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Out)
 $utf8 = New-Object System.Text.UTF8Encoding($false)

@@ -52,6 +52,7 @@ local DEFAULTS = {
     showKnown        = true,  -- flueben ved kendte, kryds ved ukendte opskrifter
     tooltipTransparency = 0,  -- baggrundens gennemsigtighed i tooltips med reagent-info (0-100 %)
     classSpells      = "all", -- class-spells i tooltippen: "all", "mine" eller "off"
+    showEvents       = true,  -- event-quests (fx Darkmoon Faire) i tooltippen
     showMinimap      = true,  -- vis knappen ved minimap
     minimapAngle     = 220,   -- knappens placering rundt om minimap (grader)
     debug            = false,
@@ -197,7 +198,27 @@ local function MakeEntry(profId, id, recipe)
     -- gule tal er derimod tit regnet ud som midten mellem orange og grøn.
     local tiers, orange, yellow
     local placeholder, dropped = false, false
-    if lib then
+    local client = recipe.c   -- Forevers egne { gul, grå } fra klientdata (SkillLineAbility)
+    if lib and type(client) == "table" and client[1] and client[2] then
+        -- Forevers egne tal: gul og grå fra klientdata, grøn er midten.
+        -- Orange (kravet) kommer stadig fra biblioteket.
+        yellow = client[1]
+        local grey = client[2]
+        local green = math.floor((yellow + grey) / 2)
+        placeholder = (req == nil or borrowed) and lib[1] == 1
+        if placeholder then orange = req else orange = lib[1] end
+        -- Et lånt Vanilla-krav over den gule grænse passer ikke til Forever
+        -- (Bolt of Silk Cloth), og et krav over den grå grænse kan ikke passe.
+        -- Forevers egne krav beholdes ellers, så opskriften er rød, indtil
+        -- man kan lære den.
+        if req and ((borrowed and req > yellow) or req > grey) then
+            req, borrowed, dropped = nil, false, true
+        end
+        -- Ligger kravet over den gule grænse, er opskriften aldrig orange
+        if orange and orange > yellow then orange = nil end
+        tiers = { orange, yellow, green, grey }
+    elseif lib then
+        -- Uden Forevers egne tal: bibliotekets tal rettet efter Forevers regler
         local grey = lib[4]
         -- Bibliotekets regel: orange er kun en pladsholder, når requiredSkill
         -- mangler eller er lånt fra Vanilla, OG difficulty[1] == 1.
@@ -461,6 +482,70 @@ local function ClassUses(itemID)
 end
 
 ------------------------------------------------------------------------
+-- Event-quests. EventData.lua er en håndskrevet liste:
+-- ns.events[key] = { name, iconItem } og
+-- ns.eventReagents[itemID] = { { e = event, q = quest, t = navn, n = antal } }
+------------------------------------------------------------------------
+
+local function EventIcon(key, size)
+    local ev = ns and ns.events and ns.events[key]
+    local icon
+    if ev and ev.iconItem then
+        if C_Item and C_Item.GetItemIconByID then
+            local ok, v = pcall(C_Item.GetItemIconByID, ev.iconItem)
+            if ok then icon = v end
+        end
+        if not icon and GetItemIcon then
+            local ok, v = pcall(GetItemIcon, ev.iconItem)
+            if ok then icon = v end
+        end
+    end
+    icon = icon or UNKNOWN_ICON
+    return string.format("|T%s:%d:%d:0:0:64:64:5:59:5:59|t", tostring(icon), size, size)
+end
+
+local function EventName(key)
+    local ev = ns and ns.events and ns.events[key]
+    return ev and ev.name or tostring(key)
+end
+
+-- Questens navn på spillerens sprog, ellers det engelske navn fra listen.
+-- Gemmes ikke, da spillet først kender navnet, når questen er hentet.
+local function QuestName(id, fallback)
+    local title
+    if C_QuestLog and C_QuestLog.GetTitleForQuestID then
+        local ok, v = pcall(C_QuestLog.GetTitleForQuestID, id)
+        if ok then title = v end
+    end
+    if (type(title) ~= "string" or title == "") and C_QuestLog and C_QuestLog.GetQuestInfo then
+        local ok, v = pcall(C_QuestLog.GetQuestInfo, id)
+        if ok then title = v end
+    end
+    if type(title) ~= "string" or title == "" then title = fallback or ("Quest " .. tostring(id)) end
+    return title
+end
+
+-- Itemets event-quests, samlet pr. event (i den rækkefølge listen har dem)
+local eventCache = {}
+local function EventUses(itemID)
+    local data = ns and ns.eventReagents and ns.eventReagents[itemID]
+    if not data then return nil end
+    if eventCache[itemID] then return eventCache[itemID] end
+    local byEvent, list = {}, {}
+    for _, u in ipairs(data) do
+        local ev = byEvent[u.e]
+        if not ev then
+            ev = { key = u.e, quests = {} }
+            byEvent[u.e] = ev
+            list[#list + 1] = ev
+        end
+        ev.quests[#ev.quests + 1] = u
+    end
+    eventCache[itemID] = list
+    return list
+end
+
+------------------------------------------------------------------------
 -- Tooltip
 ------------------------------------------------------------------------
 
@@ -471,8 +556,10 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
     local list = EnsureIndex() and index[itemID] or nil
     local classMode = forceExpanded and "all" or S.classSpells
     local classUses = classMode ~= "off" and ClassUses(itemID) or nil
-    if not list and not classUses then return false end
+    local eventUses = (forceExpanded or S.showEvents) and EventUses(itemID) or nil
+    if not list and not classUses and not eventUses then return false end
     list = list or {}
+    local eventAll = eventUses or {}
 
     local skills, localNames = GetPlayerSkills()
 
@@ -540,11 +627,12 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
         local icon = ClassIcon(c.token, 16)
         if icon ~= "" then icons[#icons + 1] = icon end
     end
+    for _, ev in ipairs(eventAll) do icons[#icons + 1] = EventIcon(ev.key, 16) end
     local header = L.REAGENT_FOR .. " " .. table.concat(icons, " ")
     -- Ingen tom linje før "Reagent for:", så den ligger lige under spillets linjer
 
     -- Filteret skjuler alt: kun ikonlinjen (Shift viser ikke mere)
-    if #order == 0 and #classShown == 0 then
+    if #order == 0 and #classShown == 0 and #eventAll == 0 then
         tooltip:AddLine(header, 1, 0.82, 0)
         return true
     end
@@ -641,6 +729,22 @@ local function AddReagentInfo(tooltip, itemID, forceExpanded)
             end
         end
         hidden = hidden + (#c.spells - count)
+    end
+
+    -- Event-quests: eventets navn og ikon, derefter quests med antal
+    for _, ev in ipairs(eventAll) do
+        tooltip:AddLine(EventIcon(ev.key, 14) .. " " .. EventName(ev.key), 1, 0.82, 0)
+        local count = #ev.quests
+        if not expanded and count > maxLines then count = maxLines end
+        for i = 1, count do
+            local u = ev.quests[i]
+            local left = "    |cffffffff" .. QuestName(u.q, u.t) .. "|r"
+            if S.showCounts and u.n and u.n > 1 then
+                left = left .. " |cffbbbbbbx" .. u.n .. "|r"
+            end
+            tooltip:AddLine(left)
+        end
+        hidden = hidden + (#ev.quests - count)
     end
 
     -- "*" efter et tal (krav lånt fra Vanilla) forklares ikke i tooltippen,
@@ -1026,6 +1130,8 @@ local OPTION_CHECKS = {
       tip = "Show only the \"Reagent for\" line with the profession icons. Hold Shift while you hover over an item to see the recipes." },
     { key = "hideNumbers",   label = "Hide skill numbers",
       tip = "Show only the coloured recipe names, without the four skill levels." },
+    { key = "showEvents",    label = "Show event quests",
+      tip = "Show which event quests use the item, for example the Darkmoon Faire quests where you turn in items for prize tickets." },
     { key = "showKnown",     label = "Mark known recipes",
       tip = "Green check for recipes this character knows, red cross for recipes it does not know yet. Open each profession window once so the addon can see your recipes." },
 }
@@ -1489,6 +1595,9 @@ local function Status()
     local classItems = 0
     for _ in pairs(ns and ns.classReagents or {}) do classItems = classItems + 1 end
     Print("class spell data: " .. tostring(ns and ns.classSource or "NOT loaded") .. ", " .. classItems .. " reagents")
+    local eventItems = 0
+    for _ in pairs(ns and ns.eventReagents or {}) do eventItems = eventItems + 1 end
+    Print("event quest data: " .. eventItems .. " items")
     -- Tooltippens baggrund lige nu (Blizzards værdier, når vi ikke har ændret den)
     pcall(function()
         local center = GameTooltip and GameTooltip.NineSlice and GameTooltip.NineSlice.Center
@@ -1507,7 +1616,7 @@ local function Status()
     local ok, why = EnsureIndex()
     if ok then
         Print(string.format("Indexed %d recipes and %d reagents.", recipeCount, reagentCount))
-        Print(string.format("%d recipes have no Forever orange level (placeholder). %d of them had a Vanilla requirement above the yellow level, which was ignored.",
+        Print(string.format("%d recipes have no Forever orange level (placeholder). %d requirements above the Forever yellow level were ignored.",
             placeholderCount, droppedCount))
     else
         Print("Could not build index: " .. tostring(why))
@@ -1539,6 +1648,7 @@ local function Help()
     print("  /rst lines <n>  - recipes per profession without Shift (now " .. S.maxPerProfession .. ")")
     print("  /rst transparency <0-100>  - background transparency of tooltips with reagent info (now " .. S.tooltipTransparency .. "%)")
     print("  /rst classes [all | mine | off]  - class spells in tooltips (now " .. CLASS_MODE_TEXT[NormValue("classSpells", S.classSpells)] .. ")")
+    print("  /rst events  - toggle event quests (Darkmoon Faire) in tooltips")
     print("  /rst counts  - toggle reagent counts (x2)")
     print("  /rst grey  - toggle: hide grey recipes")
     print("  /rst compact  - toggle: only icons until you hold Shift")
@@ -1587,6 +1697,9 @@ SlashHandler = function(msg)
             end
         end
         Print("class spells: " .. CLASS_MODE_TEXT[NormValue("classSpells", S.classSpells)])
+    elseif cmd == "events" then
+        S.showEvents = not S.showEvents
+        Print("event quests " .. (S.showEvents and "shown" or "hidden"))
     elseif cmd == "counts" then
         S.showCounts = not S.showCounts
         Print("counts " .. (S.showCounts and "on" or "off"))

@@ -4,6 +4,13 @@ Author: Boomsticky
 Game: World of Warcraft: Forever (interface 16001)
 Requires: nothing (the recipe data is built in)
 
+## 1.7.0 – 2026-11-23
+- Event quests: items used in Darkmoon Faire quests get the Darkmoon Faire icon in the "Reagent for" line and a Darkmoon Faire section with the quests and how many items they need, for example "Small Furry Paws x5" and "Copper Modulator x5". The list covers the gathered items, the crafted items and the four decks.
+- New setting "Show event quests" and command `/rst events`.
+- Corrected skill levels: the yellow and grey levels now come from WoW: Forever's own client data (green is halfway between them). This fixes recipes where the yellow and green levels were too low, for example Linen Bandage (now 30/45/60), Handstitched Leather Boots (40/55/70) and Copper Bracers (20/40/60), and a few with wrong grey levels, such as Coarse Sharpening Stone.
+- The recipe and class data are updated to the current WoW: Forever build (1.60.1.71037) and LibProfessionDB v1.10.1: new recipes from the latest Forever patch, renamed and removed recipes, and changed reagents (for example Green Woolen Bag now needs 5 Wool Cloth).
+- If a recipe's skill requirement is above its yellow level, the recipe is never orange, so the orange level shows `?`. The recipe is still red until you can learn it. A requirement borrowed from Vanilla above the yellow level is ignored, as before.
+
 ## 1.6.0 – 2026-11-20
 - Class spell reagents: the tooltip now also shows which class spells use the item, for example Light Feather for Slow Fall (Mage) and Levitate (Priest), Shiny Fish Scales for Water Breathing (Shaman) and Soul Shards for Warlock spells. Rogue poisons are included.
 - The class icons are shown in the "Reagent for" line next to the profession icons. Each class gets a section in its class colour with the spells and the level they are learned at. Ranks of the same spell are shown as one line. Spells your own class is not high enough level for are shown in red.

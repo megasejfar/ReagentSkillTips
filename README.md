@@ -24,6 +24,7 @@ The four numbers are the skill levels where the recipe turns **orange, yellow, g
 - **Profession icons** for every profession that uses the item – also the ones you have filtered out.
 - **Known recipes are marked** with a green check, unknown ones with a red cross. Open each profession window once so the addon can see your recipes.
 - **Class spell reagents**, for example Light Feather for Slow Fall (Mage) and Levitate (Priest), Shiny Fish Scales for Water Breathing, Soul Shards and Rogue poisons. Each class is shown in its class colour with the level the spell is learned at. Spells your own class is not high enough level for are red.
+- **Event quests**: items used in Darkmoon Faire quests (for example Small Furry Paw, Copper Modulator and the decks) show the Darkmoon Faire icon and the quests with how many items they need.
 - Your own professions and class are listed first. `x2` shows when a recipe or spell uses more than one of the item.
 - **Hold Shift** to see all recipes. Without Shift, the list starts at the first recipe that is not grey for you.
 - Works in normal item tooltips and in chat links.
@@ -48,6 +49,7 @@ Click the minimap button, or open **Esc → Options → AddOns → Reagent Skill
 - Choose how many recipes are shown without Shift (1–30).
 - Background transparency (0–100%) of tooltips that show Reagent Skill Tips info: 0% is a fully solid background. Text, icons and the border stay fully visible.
 - Class spells: all classes, only your class, or off.
+- Show event quests (Darkmoon Faire).
 - Show or hide the minimap button.
 
 Changes are saved when you click **Save**. Settings are saved per character.
@@ -63,12 +65,13 @@ Changes are saved when you click **Save**. Settings are saved per character.
 | `/rst known` | Turn the check/cross marks on or off |
 | `/rst transparency <0-100>` | Set the background transparency of tooltips with reagent info |
 | `/rst classes [all \| mine \| off]` | Class spells in tooltips: all classes, only your class or off |
+| `/rst events` | Turn the event quests (Darkmoon Faire) on or off |
 | `/rst status` | Check the recipe data, your skills and known recipes |
 | `/rst debug` | Show error messages in chat |
 
 ## About the skill levels
 
-The skill levels come from LibProfessionDB and are corrected for Forever. In Forever the green level is always halfway between yellow and grey, and the addon uses that to fix the yellow and green levels.
+The yellow and grey levels come from WoW: Forever's own client data, and the green level is halfway between them (in Forever it always is). The orange level (the skill requirement) comes from LibProfessionDB. If the requirement is above the Forever yellow level, the recipe is never orange and the orange level shows `?` (the recipe is still red until you can learn it). A requirement borrowed from Vanilla that is above the yellow level is ignored. For the few recipes without Forever client data, the LibProfessionDB levels are corrected with the same rule.
 
 - `*` after the first number: the skill requirement is borrowed from Vanilla and not yet confirmed for Forever.
 - `?`: that level is not known for Forever yet.
@@ -83,7 +86,7 @@ The recipe data in `Data.lua` is generated from LibProfessionDB's Forever data. 
 powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-data.ps1
 ```
 
-The script reads `World of Warcraft\_forever_\Interface\AddOns\ProfessionDB` (use `-ProfessionDB <folder>` for another location), takes only the fields the addon uses, and rewrites `Data.lua`. It stops with an error instead of writing a broken file if the data format has changed. `/rst status` in the game shows which data version is built in.
+The script reads `World of Warcraft\_forever_\Interface\AddOns\ProfessionDB` (use `-ProfessionDB <folder>` for another location) and `SkillLineAbility.csv` from WoW: Forever's client data for the same build (exported from wago.tools, see below; use `-Wago <folder>` for another location), takes only the fields the addon uses, and rewrites `Data.lua`. It stops with an error instead of writing a broken file if the data format has changed. `/rst status` in the game shows which data version is built in.
 
 The class spell data in `ClassData.lua` is generated from WoW: Forever's own client data. Export these four tables as CSV from [wago.tools](https://wago.tools) for the Forever build (the "CSV" button on each table page): `SpellReagents`, `SkillLineAbility`, `SkillLine` and `SpellLevels`. Put them in one folder (default: `wago-<build>` next to the repository folder) and run:
 
@@ -92,6 +95,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tools\build-class-data.ps1 -
 ```
 
 Use `-Wago <folder>` for another location. The script takes the spells of the class skill lines (and Rogue poisons), links them to their reagents and levels, and checks a few known cases (Light Feather for Slow Fall and Levitate, Fish Oil for Water Walking) before it writes `ClassData.lua`.
+
+The event quest list in `EventData.lua` is written by hand. The Darkmoon Faire entries come from the Wowhead Classic quest pages. To add an event, add it to `ns.events` and its items to `ns.eventReagents` (the format is described at the top of the file).
 
 ## Contributing
 
